@@ -38,7 +38,7 @@ include $(LUFA_PATH)/Build/lufa_avrdude.mk
 include $(LUFA_PATH)/Build/lufa_atprogram.mk
 
 
-flash: VirtualSerial.hex
+flash: main.hex
 	sudo dfu-programmer atmega32u4 erase
 	sudo dfu-programmer atmega32u4 flash $<
 	sudo dfu-programmer atmega32u4 start ; true
