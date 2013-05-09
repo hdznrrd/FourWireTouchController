@@ -1,25 +1,45 @@
-AVR_CHIP = atmega32u4
-AVR_CHIP_FREQUENCY = 16000000
-CODE_MAIN = main
+#
+#             LUFA Library
+#     Copyright (C) Dean Camera, 2013.
+#
+#  dean [at] fourwalledcubicle [dot] com
+#           www.lufa-lib.org
+#
+# --------------------------------------
+#         LUFA Project Makefile.
+# --------------------------------------
 
-AVR_PROGRAMMER = dfu-programmer
-AVR_COMPILER = avr-gcc
-AVR_HEX = avr-objcopy
+# Run "make help" for target help.
 
-all: $(CODE_MAIN).hex
-	
-%.o: %.c
-	$(AVR_COMPILER) -DF_CPU=$(AVR_CHIP_FREQUENCY) -Os -mmcu=$(AVR_CHIP) -o $@ $<
-	
-%.hex: %.o
-	$(AVR_HEX) -O ihex $< $@
-	
-flash: $(CODE_MAIN).hex
-	sudo $(AVR_PROGRAMMER) $(AVR_CHIP) erase
-	sudo $(AVR_PROGRAMMER) $(AVR_CHIP) flash $<
-	sudo $(AVR_PROGRAMMER) $(AVR_CHIP) start ; true
+MCU          = atmega32u4
+ARCH         = AVR8
+BOARD        = NONE
+F_CPU        = 16000000
+F_USB        = $(F_CPU)
+OPTIMIZATION = s
+TARGET       = main
+SRC          = $(TARGET).c Descriptors.c $(LUFA_SRC_USB)
+LUFA_PATH    = ./3rdparty/LUFA/LUFA
+CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/
+LD_FLAGS     =
 
-clean:
-	rm -f $(CODE_MAIN).hex $(CODE_MAIN).o
+# Default target
+all:
 
-.PHONY: flash clean
+# Include LUFA build script makefiles
+include $(LUFA_PATH)/Build/lufa_core.mk
+include $(LUFA_PATH)/Build/lufa_sources.mk
+include $(LUFA_PATH)/Build/lufa_build.mk
+include $(LUFA_PATH)/Build/lufa_cppcheck.mk
+include $(LUFA_PATH)/Build/lufa_doxygen.mk
+include $(LUFA_PATH)/Build/lufa_dfu.mk
+include $(LUFA_PATH)/Build/lufa_hid.mk
+include $(LUFA_PATH)/Build/lufa_avrdude.mk
+include $(LUFA_PATH)/Build/lufa_atprogram.mk
+
+
+flash: VirtualSerial.hex
+	sudo dfu-programmer atmega32u4 erase
+	sudo dfu-programmer atmega32u4 flash $<
+	sudo dfu-programmer atmega32u4 start ; true
+
