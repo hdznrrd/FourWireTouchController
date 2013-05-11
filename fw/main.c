@@ -40,6 +40,10 @@
 #define LED_PORT PORTE
 #define LED_PIN (1<<PE6)
 
+#define LHI LED_PORT |= LED_PIN
+#define LLO LED_PORT &= ~LED_PIN
+#define LTG LED_PORT ^= LED_PIN
+
 // note: touchpanel has to be connected to ADC pins on port F
 #define TOUCH_DDR DDRF
 #define TOUCH_PORT PORTF
@@ -54,11 +58,11 @@
 #define TOUCH_X2_ADCMUX	(1)
 #define TOUCH_Y1_ADCMUX	(0)
 #define TOUCH_Y2_ADCMUX	(4)
-#define TOUCH_ADCREFV (3<<6)
+#define TOUCH_ADCREFV ((0<<REFS1)|(1<<REFS0))	// AVcc w/ cap on AREF
 
 #define SET_OUTPUT(x) TOUCH_DDR &= (~TOUCH_ALL_PINS | x)
 #define SET_DRIVER(x) TOUCH_PORT &= (~TOUCH_ALL_PINS | x)
-#define SET_INPUT(x) ADMUX = (TOUCH_ADCREFV| x)
+#define SET_INPUT(x) ADMUX &= ((~((1<<MUX0)|(1<<MUX1)|(1<<MUX2)|(1<<MUX3)|(1<<MUX4)))|x)
 
 struct STouchPosition {
 	unsigned short x;
@@ -85,12 +89,13 @@ static CDC_LineEncoding_t LineEncoding = { .BaudRateBPS = 0,
 
 inline unsigned short adc_sample()
 {
-	ADCSRA |= ADSC;
-	while(ADCSRA&ADSC);
+	LHI;
+	ADCSRA |= (1<<ADSC);
+	while(ADCSRA&(1<<ADSC));
 
 	unsigned short data = ADCL;
 	data |= (ADCH<<8);
-
+	LLO;
 	return data;
 }
 
@@ -110,7 +115,7 @@ inline unsigned short sample_x_forward()
 	// before dividing by two
 
 	unsigned short data = 0;
-	
+
 	SET_OUTPUT(TOUCH_Y_PINS);
 	SET_DRIVER(TOUCH_Y2_PIN);
 	SET_INPUT(TOUCH_X2_ADCMUX);
@@ -226,19 +231,68 @@ void Sample_Task()
 /** Main program entry point. This routine contains the overall program flow, including initial
  *  setup of all components and the main program loop.
  */
+
+
 int main(void)
 {
 	SetupHardware();
 
 	GlobalInterruptEnable();
 
+	LLO;
+
 	for (;;)
 	{
-		//Sample_Task();
+		
+		if (USB_DeviceState == DEVICE_STATE_Configured)
+		{
+			Sample_Task();
+		}
 		CDC_Task();
 		USB_USBTask();
 	}
 }
+
+void adc_init()
+{
+
+	/** Setup and enable ADC **/
+	ADMUX = (0<<REFS1)|	// Reference Selection Bits
+			(1<<REFS0)|		// AVcc - external cap at AREF
+			(0<<ADLAR)|
+			(0<<MUX4)| // select no input channels
+			(0<<MUX3)|
+			(0<<MUX2)|
+			(0<<MUX1)|
+			(0<<MUX0);
+	
+	ADCSRA = (1<<ADEN)|	// 1 = ADC ENable
+			(0<<ADSC)|		// 1 = ADC Start Conversion ( set in adc read function)
+			(0<<ADATE)|		// 1 = ADC Auto Trigger Enable
+			(0<<ADIF)|		// ADC Interrupt Flag
+			(0<<ADIE)|		// ADC Interrupt Enable
+			(0<<ADPS2)|
+			(0<<ADPS1)|		// ADC Prescaler Selects adc sample freq
+			(0<<ADPS0);
+
+	ADCSRB = (1<<ADHSM)|	// High Speed mode select
+			(0<<ACME)|		// Analog Comparator Mux enable
+			(0<<MUX5)|
+			(0<<ADTS3)|	
+			(0<<ADTS2)|		// Sets Auto Trigger source if ADATE is 1
+			(0<<ADTS1)|
+			(0<<ADTS0);
+/*
+							// Timer/Counter1 Interrupt Mask Register
+	TIMSK1 |= (1<<TOIE1);	// enable overflow interrupt
+	
+	
+	// CLK/64, how is that supposed to be native?
+	TCCR1B |= (1<<CS11)|
+			(1<<CS10);  // native clock
+*/
+}
+
 
 /** Configures the board hardware and chip peripherals for the demo's functionality. */
 void SetupHardware(void)
@@ -250,12 +304,14 @@ void SetupHardware(void)
 	clock_prescale_set(clock_div_1);	// disable clock division
 
 	memset(&touchPosition,0x00,sizeof(struct STouchPosition));
+	
+	MCUCR = (1 << JTD);	// disable jtag
+	MCUCR = (1 << JTD);	// disable jtag
 
 	TOUCH_DDR |= TOUCH_ALL_PINS;				// enable output on touch pins
 	TOUCH_PORT &= ~TOUCH_ALL_PINS;			// set all pins low
 
-	ADCSRA |= ADEN;										// enable ADC
-	ADMUX = TOUCH_ADCREFV;						// internal voltage reference, no adc channel selected
+	adc_init();
 
 	LED_DDR = LED_PIN;								// configure LED pin
 
@@ -358,7 +414,6 @@ void CDC_Task(void)
 	/* Flag management - Only allow one string to be sent per action */
 	if ((ReportString != NULL) && (ActionSent == false) && LineEncoding.BaudRateBPS)
 	{
-		LED_PORT ^= LED_PIN;
 
 		ActionSent = true;
 
