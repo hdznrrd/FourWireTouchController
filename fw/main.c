@@ -35,6 +35,8 @@
 */
 
 #include "main.h"
+#include <inttypes.h>
+#include <util/delay.h>
 
 #define LED_DDR DDRE
 #define LED_PORT PORTE
@@ -54,20 +56,29 @@
 #define TOUCH_ALL_PINS (TOUCH_X1_PIN|TOUCH_X2_PIN|TOUCH_Y1_PIN|TOUCH_Y2_PIN)
 #define TOUCH_X_PINS (TOUCH_X1_PIN|TOUCH_X2_PIN)
 #define TOUCH_Y_PINS (TOUCH_Y1_PIN|TOUCH_Y2_PIN)
-#define TOUCH_X1_ADCMUX	(5)
-#define TOUCH_X2_ADCMUX	(1)
-#define TOUCH_Y1_ADCMUX	(0)
-#define TOUCH_Y2_ADCMUX	(4)
+#define TOUCH_X1_ADCMUX	((1<<MUX0)|(1<<MUX2))//(5)
+#define TOUCH_X2_ADCMUX	((1<<MUX0))//(1)
+#define TOUCH_Y1_ADCMUX	((0))//(0)
+#define TOUCH_Y2_ADCMUX ((1<<MUX2))//(4)
 #define TOUCH_ADCREFV ((0<<REFS1)|(1<<REFS0))	// AVcc w/ cap on AREF
 
-#define SET_OUTPUT(x) TOUCH_DDR &= (~TOUCH_ALL_PINS | x)
-#define SET_DRIVER(x) TOUCH_PORT &= (~TOUCH_ALL_PINS | x)
-#define SET_INPUT(x) ADMUX &= ((~((1<<MUX0)|(1<<MUX1)|(1<<MUX2)|(1<<MUX3)|(1<<MUX4)))|x)
+#define SET_INPUT_HIZ(x) TOUCH_DDR &= ~x; TOUCH_PORT &= ~x;
+#define SET_ALL_INPUT_HIZ() SET_INPUT_HIZ(TOUCH_ALL_PINS)
+#define SET_OUTPUT_LOW(x) TOUCH_DDR |= x; TOUCH_PORT &= ~x;
+#define SET_OUTPUT_HIGH(x) TOUCH_DDR |= x; TOUCH_PORT |= x;
+#define SEL_ADC(x) ADMUX = (TOUCH_ADCREFV|x);
+
+#define SAMPLE_ACCU_COORD (32)
+#define SAMPLE_ACCU_PRESSURE (16)
+
+//#define SET_OUTPUT(x) TOUCH_DDR &= (~TOUCH_ALL_PINS | x)
+//#define SET_DRIVER(x) TOUCH_PORT &= (~TOUCH_ALL_PINS | x)
+
 
 struct STouchPosition {
-	unsigned short x;
-	unsigned short y;
-	unsigned short p;
+	uint16_t x;
+	uint16_t y;
+	uint16_t p;
 };
 
 static struct STouchPosition touchPosition;
@@ -87,20 +98,20 @@ static CDC_LineEncoding_t LineEncoding = { .BaudRateBPS = 0,
 
 
 
-inline unsigned short adc_sample()
+inline uint16_t adc_sample()
 {
 	LHI;
 	ADCSRA |= (1<<ADSC);
 	while(ADCSRA&(1<<ADSC));
 
-	unsigned short data = ADCL;
-	data |= (ADCH<<8);
+	uint16_t data = ADC;//ADCL;
+	//data |= (ADCH<<8);
 	LLO;
 	return data;
 }
 
 
-inline unsigned short sample_x_forward()
+/*inline*/ uint16_t sample_x_forward()
 {
 	// set Y1 to Vcc
 	// set Y1 to GND
@@ -114,75 +125,95 @@ inline unsigned short sample_x_forward()
 	// so it can still be added to the backward measurement
 	// before dividing by two
 
-	unsigned short data = 0;
+	uint16_t data = 0;
 
-	SET_OUTPUT(TOUCH_Y_PINS);
-	SET_DRIVER(TOUCH_Y2_PIN);
-	SET_INPUT(TOUCH_X2_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_LOW(TOUCH_Y1_PIN);
+	SET_OUTPUT_HIGH(TOUCH_Y2_PIN);
+	SEL_ADC(TOUCH_X2_ADCMUX);
 
-	data += adc_sample();
-	data += adc_sample();
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_COORD; ++i)
+	{
+		if(i<SAMPLE_ACCU_COORD/2)
+			adc_sample();
+		else
+			data += adc_sample();
+	}
 
 	return data;
 }
 
-inline unsigned short sample_x_backward()
+/*inline*/ uint16_t sample_x_backward()
 {
 	// same as X only we'll switch the Vcc and GND direction
 	// also, since we're measuring backwards, we'll have to subtract
 	// the measured value from max sample value (1023)
 
-	unsigned short data = 0;
+	uint16_t data = 0;
 
-	SET_OUTPUT(TOUCH_Y_PINS);
-	SET_DRIVER(TOUCH_Y1_PIN);
-	SET_INPUT(TOUCH_X2_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_LOW(TOUCH_Y2_PIN);
+	SET_OUTPUT_HIGH(TOUCH_Y1_PIN);
+	SEL_ADC(TOUCH_X2_ADCMUX);
 
-	data += adc_sample();
-	data += adc_sample();
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_COORD; ++i)
+	{
+		if(i<SAMPLE_ACCU_COORD/2)
+			adc_sample();
+		else
+			data += 1023-adc_sample();
+	}
 
 	return data;
 }
 
-inline unsigned short sample_y_forward()
+/*inline*/ uint16_t sample_y_forward()
 {
 	// see sample_x_forward, just rotated 90 deg
 
-	unsigned short data = 0;
+	uint16_t data = 0;
 	
-	SET_OUTPUT(TOUCH_X_PINS);
-	SET_DRIVER(TOUCH_X2_PIN);
-	SET_INPUT(TOUCH_Y1_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_LOW(TOUCH_X1_PIN);
+	SET_OUTPUT_HIGH(TOUCH_X2_PIN);
+	SEL_ADC(TOUCH_Y2_ADCMUX);
 
-	data += adc_sample();
-	data += adc_sample();
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_COORD; ++i)
+	{
+		if(i<SAMPLE_ACCU_COORD/2)
+			adc_sample();
+		else
+			data += adc_sample();
+	}
 
 	return data;
 }
 
-inline unsigned short sample_y_backward()
+/*inline*/ uint16_t sample_y_backward()
 {
 	// see sample_x_backward, just rotated 90 deg
 
-	unsigned short data = 0;
+	uint16_t data = 0;
 	
-	SET_OUTPUT(TOUCH_X_PINS);
-	SET_DRIVER(TOUCH_X1_PIN);
-	SET_INPUT(TOUCH_Y1_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_LOW(TOUCH_X2_PIN);
+	SET_OUTPUT_HIGH(TOUCH_X1_PIN);
+	SEL_ADC(TOUCH_Y2_ADCMUX);
 
-	data += adc_sample();
-	data += adc_sample();
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_COORD; ++i)
+	{
+		if(i<SAMPLE_ACCU_COORD/2)
+			adc_sample();
+		else
+			data += 1023-adc_sample();
+	}
 
 	return data;
 }
 
-inline unsigned short sample_pressure()
+/*inline*/ uint16_t sample_pressure()
 {
-	unsigned short data = 0;
+	uint16_t data = 0;
 
 	// set opposite sides (eg. X1, X2) to Vcc
 	// pull down one of the leftover sides (eg. Y1) to GND
@@ -194,29 +225,61 @@ inline unsigned short sample_pressure()
 	// we have 16 bits of total space
 	// so we can add up all 4 samples easily without overflow
 
-	SET_OUTPUT(TOUCH_X_PINS|TOUCH_Y1_PIN);
-	SET_DRIVER(TOUCH_X_PINS);
-	SET_INPUT(TOUCH_Y2_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_HIGH(TOUCH_X2_PIN);
+	SET_OUTPUT_HIGH(TOUCH_X1_PIN);
+	SET_OUTPUT_LOW(TOUCH_Y1_PIN);
+	SEL_ADC(TOUCH_Y2_ADCMUX);
 
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_PRESSURE; ++i)
+	{
+		if(i<SAMPLE_ACCU_PRESSURE/2)
+			adc_sample();
+		else
+			data += adc_sample();
+	}
 
-	SET_OUTPUT(TOUCH_X_PINS|TOUCH_Y2_PIN);
-	SET_DRIVER(TOUCH_X_PINS);
-	SET_INPUT(TOUCH_Y1_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_HIGH(TOUCH_X2_PIN);
+	SET_OUTPUT_HIGH(TOUCH_X1_PIN);
+	SET_OUTPUT_LOW(TOUCH_Y2_PIN);
+	SEL_ADC(TOUCH_Y1_ADCMUX);
 
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_PRESSURE; ++i)
+	{
+		if(i<SAMPLE_ACCU_PRESSURE/2)
+			adc_sample();
+		else
+			data += adc_sample();
+	}
 
-	SET_OUTPUT(TOUCH_Y_PINS|TOUCH_X1_PIN);
-	SET_DRIVER(TOUCH_Y_PINS);
-	SET_INPUT(TOUCH_X2_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_HIGH(TOUCH_Y2_PIN);
+	SET_OUTPUT_HIGH(TOUCH_Y1_PIN);
+	SET_OUTPUT_LOW(TOUCH_X1_PIN);
+	SEL_ADC(TOUCH_X2_ADCMUX);
 
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_PRESSURE; ++i)
+	{
+		if(i<SAMPLE_ACCU_PRESSURE/2)
+			adc_sample();
+		else
+			data += adc_sample();
+	}
 
-	SET_OUTPUT(TOUCH_Y_PINS|TOUCH_X2_PIN);
-	SET_DRIVER(TOUCH_Y_PINS);
-	SET_INPUT(TOUCH_X1_ADCMUX);
+	SET_ALL_INPUT_HIZ();
+	SET_OUTPUT_HIGH(TOUCH_Y2_PIN);
+	SET_OUTPUT_HIGH(TOUCH_Y1_PIN);
+	SET_OUTPUT_LOW(TOUCH_X2_PIN);
+	SEL_ADC(TOUCH_X1_ADCMUX);
 
-	data += adc_sample();
+	for(int i=0; i<SAMPLE_ACCU_PRESSURE; ++i)
+	{
+		if(i<SAMPLE_ACCU_PRESSURE/2)
+			adc_sample();
+		else
+			data += adc_sample();
+	}
 
 	return data;
 }
@@ -247,6 +310,7 @@ int main(void)
 		if (USB_DeviceState == DEVICE_STATE_Configured)
 		{
 			Sample_Task();
+			_delay_ms(5);
 		}
 		CDC_Task();
 		USB_USBTask();
@@ -272,7 +336,7 @@ void adc_init()
 			(0<<ADIF)|		// ADC Interrupt Flag
 			(0<<ADIE)|		// ADC Interrupt Enable
 			(0<<ADPS2)|
-			(0<<ADPS1)|		// ADC Prescaler Selects adc sample freq
+			(1<<ADPS1)|		// ADC Prescaler Selects adc sample freq
 			(0<<ADPS0);
 
 	ADCSRB = (1<<ADHSM)|	// High Speed mode select
@@ -282,15 +346,6 @@ void adc_init()
 			(0<<ADTS2)|		// Sets Auto Trigger source if ADATE is 1
 			(0<<ADTS1)|
 			(0<<ADTS0);
-/*
-							// Timer/Counter1 Interrupt Mask Register
-	TIMSK1 |= (1<<TOIE1);	// enable overflow interrupt
-	
-	
-	// CLK/64, how is that supposed to be native?
-	TCCR1B |= (1<<CS11)|
-			(1<<CS10);  // native clock
-*/
 }
 
 
