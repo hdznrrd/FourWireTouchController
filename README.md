@@ -1,5 +1,4 @@
 # FourWireTouchController
-(c) 2013 Gregor Jehle
 
 ## Acknowledgements
 - Dean Camera / LUFA Library, http://www.fourwalledcubicle.com/LUFA.php - Making USB a little less painful
